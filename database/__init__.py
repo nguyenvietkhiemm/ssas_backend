@@ -14,13 +14,14 @@ def fetch_schema(query):
             return [dict(zip(columns, row)) for row in rows]
 
 def build_key_map():
-    # Query các schema metadata
+    # Query schema metadata
     dimensions = fetch_schema("SELECT * FROM $SYSTEM.MDSCHEMA_DIMENSIONS")
     hierarchies = fetch_schema("SELECT * FROM $SYSTEM.MDSCHEMA_HIERARCHIES")
     levels = fetch_schema("SELECT * FROM $SYSTEM.MDSCHEMA_LEVELS")
+    measures = fetch_schema("SELECT * FROM $SYSTEM.MDSCHEMA_MEASURES") 
 
     key_map = {}
-
+    
     for dim in dimensions:
         dim_name = dim.get('DIMENSION_UNIQUE_NAME')
         if not dim_name:
@@ -38,16 +39,21 @@ def build_key_map():
                 dim_key = dim_name
                 hier_key = hier_name.split('.')[-1]
                 level_key = level_name.split('.')[-1]
-                key = f"{dim_key}.{hier_key}.{level_key}.[MEMBER_CAPTION]"
-                value = level.get('LEVEL_CAPTION', '')
-                key_map[key] = value
+                if (level_key != "[(All)]"):
+                    key = f"{dim_key}.{hier_key}.{level_key}"
+                    value = level.get('LEVEL_CAPTION', '')
+                    key_map[key] = value
+
+        # Add Measures
+    for m in measures:
+        measure_name = m.get("MEASURE_UNIQUE_NAME")
+        measure_caption = m.get("MEASURE_CAPTION", "")
+        key_map[measure_name] = measure_caption
 
     return key_map
 
-def save_key_map_to_json(key_map, filepath='./key_map.json'):
-    with open(filepath, 'w', encoding='utf-8') as f:
-        json.dump(key_map, f, ensure_ascii=False, indent=4)
-    print(f"=== Saved key_map to {filepath} ===")
-
 key_map = build_key_map()
-save_key_map_to_json(key_map)
+
+with open('./key_map.json', 'w', encoding='utf-8') as f:
+    json.dump(key_map, f, ensure_ascii=False, indent=4)
+print(f"=== Saved key_map to {'./key_map.json'} ===")

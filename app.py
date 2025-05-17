@@ -1,78 +1,30 @@
-import os, json
+from flask import Flask, jsonify, request
+from pyadomd import Pyadomd
+import os
+import json
 import clr
-from config import conn_str, dll_path # cấu hình kết nối
-import database # khởi chạy kết nối, tạo key_map, tên cột...
+from config import conn_str, dll_path, key_map  # cấu hình kết nối
+import database  # khởi chạy kết nối, tạo key_map, tên cột...
+from flask_cors import CORS
+
+from config import generate_mdx  # cấu hình kết nối
 
 clr.AddReference(dll_path)
 
-from pyadomd import Pyadomd
-from flask import Flask, jsonify, request
-
-
 app = Flask(__name__)
-
-def load_key_map_from_json(filepath='./key_map.json'):
-    with open(filepath, 'r', encoding='utf-8') as f:
-        key_map = json.load(f)
-    return key_map
-
-key_map = load_key_map_from_json()
-
-mdx_template = """
-SELECT 
-  NON EMPTY {{ [Measures].[Quantity] }} ON COLUMNS,
-  SUBSET(
-    {{
-      NONEMPTY(
-        [Dim Store].[Store ID].[Store ID].ALLMEMBERS *
-        [Dim Store].[SCA].[State].ALLMEMBERS *
-        [Dim Store].[City Name].[City Name].ALLMEMBERS *
-        [Dim Store].[Phone].[Phone].ALLMEMBERS *
-        [Dim Item].[Description].[Description].ALLMEMBERS *
-        [Dim Item].[Size].[Size].ALLMEMBERS *
-        [Dim Item].[Weight].[Weight].ALLMEMBERS *
-        [Dim Item].[Price].[Price].ALLMEMBERS,
-        [Measures].[Quantity]
-      )
-    }},
-    {offset}, {limit}
-  )
-  DIMENSION PROPERTIES MEMBER_CAPTION, MEMBER_UNIQUE_NAME ON ROWS
-FROM [Cube]
-CELL PROPERTIES VALUE, BACK_COLOR, FORE_COLOR, FORMATTED_VALUE, FORMAT_STRING, FONT_NAME, FONT_SIZE, FONT_FLAGS
-"""
-
-mdx_template = """
-SELECT 
-  NON EMPTY {{ [Measures].[Total Amount] }} ON COLUMNS,
-
-  SUBSET(
-    {{
-      NONEMPTY(
-        [Dim Customer].[Customer ID].[Customer ID].ALLMEMBERS *
-        [Fact Order].[Order ID].[Order ID].ALLMEMBERS *
-        [Dim Customer].[Customer Name].[Customer Name].ALLMEMBERS *
-        [Dim Time].[YQMD].[Day].ALLMEMBERS,
-        [Measures].[Total Amount]
-      )
-    }},
-    {offset}, {limit}
-  )
-  DIMENSION PROPERTIES MEMBER_CAPTION, MEMBER_UNIQUE_NAME ON ROWS
-
-FROM [Cube]
-
-CELL PROPERTIES VALUE, BACK_COLOR, FORE_COLOR, FORMATTED_VALUE, FORMAT_STRING, FONT_NAME, FONT_SIZE, FONT_FLAGS
-
-"""
+CORS(app)  # Cho phép tất cả domain truy cập (hoặc tùy chỉnh origin)
 
 @app.route('/api')
 def query():
+    dimensions = ["Customer ID", "Customer Name", "City Name", "Day", "Order ID"]
+    dimensions = request.args.getlist('dimensions')
     limit = int(request.args.get('limit', 10))
     offset = int(request.args.get('offset', 0))
-    
-    mdx = mdx_template.format(limit=limit, offset=offset)
-    
+
+    mdx = generate_mdx(dimensions=dimensions,
+                       limit=limit, 
+                       offset=offset)
+
     results = []
     with Pyadomd(conn_str) as conn:
         with conn.cursor().execute(mdx) as cur:
@@ -82,8 +34,10 @@ def query():
                 row_dict = dict(zip(columns, row))
                 short_dict = {}
                 for k, v in row_dict.items():
-                    if k in key_map:
-                        short_dict[key_map[k]] = v
+                    # Bỏ .[MEMBER_CAPTION] nếu có
+                    clean_key = k.replace(".[MEMBER_CAPTION]", "")
+                    if clean_key in key_map:
+                        short_dict[key_map[clean_key]] = v
                 results.append(short_dict)
     return jsonify(results)
 
